@@ -1,0 +1,581 @@
+{
+  "info": {
+    "name": "Tech Fest Registration System",
+    "_postman_id": "techfest-api-v1",
+    "description": "Complete API collection for the Tech Fest Registration System backend.\n\nBase URL: {{baseUrl}} (set to http://localhost:3000/api/v1)\n\nSet {{baseUrl}} in your environment, then populate {{token}} after login.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api/v1", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "hostToken", "value": "", "type": "string" },
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "volunteerToken", "value": "", "type": "string" },
+    { "key": "participantToken", "value": "", "type": "string" },
+    { "key": "eventId", "value": "", "type": "string" },
+    { "key": "registrationId", "value": "", "type": "string" },
+    { "key": "userId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Checks Postgres and Redis connectivity. Returns 200 if both up, 503 if either down."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Signup — Request OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Smith\",\n  \"email\": \"alice@example.com\",\n  \"phone\": \"+919876543210\",\n  \"institution\": \"Example College\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/signup", "host": ["{{baseUrl}}"], "path": ["auth", "signup"] },
+            "description": "Step 1 of signup. Sends a 6-digit OTP to the email. Rate limited: 5/15min per IP + 3/15min per email."
+          }
+        },
+        {
+          "name": "Signup — Verify OTP & Create Account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token) pm.collectionVariables.set('participantToken', res.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"otp\": \"123456\",\n  \"name\": \"Alice Smith\",\n  \"phone\": \"+919876543210\",\n  \"institution\": \"Example College\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/verify-signup", "host": ["{{baseUrl}}"], "path": ["auth", "verify-signup"] },
+            "description": "Step 2 of signup. Verifies OTP, creates user, returns JWT. Auto-saves token to participantToken."
+          }
+        },
+        {
+          "name": "Login — Request OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "description": "Step 1 of login. Sends OTP. Returns generic message regardless of whether email exists."
+          }
+        },
+        {
+          "name": "Login — Verify OTP & Get JWT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token) pm.collectionVariables.set('token', res.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"otp\": \"123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/verify-login", "host": ["{{baseUrl}}"], "path": ["auth", "verify-login"] },
+            "description": "Step 2 of login. Verifies OTP, returns JWT. Auto-saves to token variable."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/users/me", "host": ["{{baseUrl}}"], "path": ["users", "me"] },
+            "description": "Returns the authenticated user's profile including qrToken."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Events & Admin",
+      "item": [
+        {
+          "name": "HOST — Grant Admin Role",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{hostToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@techfest.example.com\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/host/admins", "host": ["{{baseUrl}}"], "path": ["host", "admins"] },
+            "description": "HOST only. Promotes a verified user to ADMIN role."
+          }
+        },
+        {
+          "name": "HOST — Revoke Admin Role",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{hostToken}}" }],
+            "url": { "raw": "{{baseUrl}}/host/admins/{{userId}}", "host": ["{{baseUrl}}"], "path": ["host", "admins", "{{userId}}"] },
+            "description": "HOST only. Demotes ADMIN back to PARTICIPANT."
+          }
+        },
+        {
+          "name": "HOST — Suspend User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{hostToken}}" }],
+            "url": { "raw": "{{baseUrl}}/host/users/{{userId}}/suspend", "host": ["{{baseUrl}}"], "path": ["host", "users", "{{userId}}", "suspend"] },
+            "description": "HOST only. Suspended users are blocked at login."
+          }
+        },
+        {
+          "name": "HOST — Unsuspend User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{hostToken}}" }],
+            "url": { "raw": "{{baseUrl}}/host/users/{{userId}}/unsuspend", "host": ["{{baseUrl}}"], "path": ["host", "users", "{{userId}}", "unsuspend"] }
+          }
+        },
+        {
+          "name": "ADMIN — Create Volunteer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"volunteer@example.com\",\n  \"eventIds\": [\"{{eventId}}\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/volunteers", "host": ["{{baseUrl}}"], "path": ["admin", "volunteers"] },
+            "description": "ADMIN/HOST. Promotes verified user to VOLUNTEER and assigns to events."
+          }
+        },
+        {
+          "name": "ADMIN — Update Volunteer Assignments",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventIds\": [\"{{eventId}}\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/volunteers/{{userId}}/assignments", "host": ["{{baseUrl}}"], "path": ["admin", "volunteers", "{{userId}}", "assignments"] },
+            "description": "ADMIN/HOST. Replaces the full set of event assignments for a volunteer."
+          }
+        },
+        {
+          "name": "ADMIN — Create Event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data && res.data.id) pm.collectionVariables.set('eventId', res.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Robotics Workshop\",\n  \"description\": \"Build and race line-following robots.\",\n  \"eventDate\": \"2026-08-15T00:00:00.000Z\",\n  \"timeslotStart\": \"2026-08-15T10:00:00.000Z\",\n  \"timeslotEnd\": \"2026-08-15T13:00:00.000Z\",\n  \"venue\": \"Seminar Hall A\",\n  \"costPerPerson\": 299.00,\n  \"totalSeats\": 50\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/events", "host": ["{{baseUrl}}"], "path": ["admin", "events"] },
+            "description": "ADMIN/HOST. Creates event and initialises Redis seat counter. Auto-saves eventId."
+          }
+        },
+        {
+          "name": "ADMIN — Update Event",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Robotics Workshop (Updated)\",\n  \"venue\": \"Main Auditorium\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/events/{{eventId}}", "host": ["{{baseUrl}}"], "path": ["admin", "events", "{{eventId}}"] }
+          }
+        },
+        {
+          "name": "ADMIN — Advance Lifecycle",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": \"REGISTRATION_CLOSED\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/events/{{eventId}}/lifecycle", "host": ["{{baseUrl}}"], "path": ["admin", "events", "{{eventId}}", "lifecycle"] },
+            "description": "ADMIN/HOST. Valid transitions: OPEN → REGISTRATION_CLOSED → ONGOING → COMPLETED. One-way only."
+          }
+        },
+        {
+          "name": "List Events",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/events?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "Any authenticated user. Lists all events with pagination."
+          }
+        },
+        {
+          "name": "Get Event by ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/events/{{eventId}}", "host": ["{{baseUrl}}"], "path": ["events", "{{eventId}}"] }
+          }
+        },
+        {
+          "name": "ADMIN — Assign Volunteer to Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/events/{{eventId}}/volunteers", "host": ["{{baseUrl}}"], "path": ["events", "{{eventId}}", "volunteers"] }
+          }
+        },
+        {
+          "name": "ADMIN — Remove Volunteer from Event",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": { "raw": "{{baseUrl}}/events/{{eventId}}/volunteers/{{userId}}", "host": ["{{baseUrl}}"], "path": ["events", "{{eventId}}", "volunteers", "{{userId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Registration & Payment",
+      "item": [
+        {
+          "name": "Register for Event (Razorpay)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data && res.data.registrationId) pm.collectionVariables.set('registrationId', res.data.registrationId);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{participantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}", "description": "Required. Use a unique UUID per attempt." }
+            ],
+            "url": { "raw": "{{baseUrl}}/events/{{eventId}}/register", "host": ["{{baseUrl}}"], "path": ["events", "{{eventId}}", "register"] },
+            "description": "PARTICIPANT only. Atomically decrements Redis seat counter via Lua script. Returns Razorpay order details for client checkout. Idempotency-Key header required. Rate limited: 10/min per user."
+          }
+        },
+        {
+          "name": "On-Spot Cash Registration (Manual)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{volunteerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"walkin@example.com\",\n  \"name\": \"Walk-in Participant\",\n  \"phone\": \"+919999999999\",\n  \"institution\": \"Some College\",\n  \"paidAmount\": 299.00\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/events/{{eventId}}/register-manual", "host": ["{{baseUrl}}"], "path": ["events", "{{eventId}}", "register-manual"] },
+            "description": "ADMIN/HOST/VOLUNTEER (scoped to assigned events). Creates participant account if needed, immediately CONFIRMED with CASH payment."
+          }
+        },
+        {
+          "name": "List Event Registrations",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{volunteerToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/registrations?page=1&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "{{eventId}}", "registrations"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            },
+            "description": "ADMIN/HOST/VOLUNTEER (scoped). Lists all registrations with participant details."
+          }
+        },
+        {
+          "name": "My Registrations",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{participantToken}}" }],
+            "url": { "raw": "{{baseUrl}}/registrations/me", "host": ["{{baseUrl}}"], "path": ["registrations", "me"] },
+            "description": "PARTICIPANT only. Returns own registration history."
+          }
+        },
+        {
+          "name": "Payment Webhook (Razorpay)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-razorpay-signature", "value": "<computed-hmac-sha256>", "description": "HMAC-SHA256 of raw body using RAZORPAY_WEBHOOK_SECRET" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_xxx\",\n        \"order_id\": \"order_xxx\",\n        \"amount\": 29900,\n        \"currency\": \"INR\"\n      }\n    }\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/payments/webhook", "host": ["{{baseUrl}}"], "path": ["payments", "webhook"] },
+            "description": "No JWT auth — authenticated via Razorpay HMAC signature. Amount is in paise (₹299.00 = 29900). Always returns 200 to Razorpay."
+          }
+        },
+        {
+          "name": "Verify Payment (Client-side)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{participantToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpayPaymentId\": \"pay_xxx\",\n  \"razorpayOrderId\": \"order_xxx\",\n  \"razorpaySignature\": \"<client-computed-signature>\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/registrations/{{registrationId}}/payment/verify", "host": ["{{baseUrl}}"], "path": ["registrations", "{{registrationId}}", "payment", "verify"] },
+            "description": "PARTICIPANT only. Fallback verification if webhook is delayed. Checks Razorpay API directly."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tickets",
+      "item": [
+        {
+          "name": "My Tickets (QR + List)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{participantToken}}" }],
+            "url": { "raw": "{{baseUrl}}/tickets/me", "host": ["{{baseUrl}}"], "path": ["tickets", "me"] },
+            "description": "PARTICIPANT only. Returns qrToken, base64 QR image, and list of CONFIRMED/ARRIVED/CHECKED_IN registrations."
+          }
+        },
+        {
+          "name": "Download PDF Ticket",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{participantToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/me/pdf?registrationId={{registrationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "me", "pdf"],
+              "query": [{ "key": "registrationId", "value": "{{registrationId}}" }]
+            },
+            "description": "PARTICIPANT only. Returns application/pdf file download. Use ?registrationId= OR ?eventId=."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Check-in / Volunteer",
+      "item": [
+        {
+          "name": "Gate Scan — Mark Arrived",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{volunteerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrToken\": \"<userId>.<hmac-hex>\",\n  \"eventId\": \"{{eventId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/volunteer/scan/gate", "host": ["{{baseUrl}}"], "path": ["volunteer", "scan", "gate"] },
+            "description": "VOLUNTEER/ADMIN/HOST. Sets arrivedAt timestamp. Requires status=CONFIRMED and arrivedAt not already set. Scope enforced in service."
+          }
+        },
+        {
+          "name": "Venue Scan — Mark Checked In",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{volunteerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrToken\": \"<userId>.<hmac-hex>\",\n  \"eventId\": \"{{eventId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/volunteer/scan/venue", "host": ["{{baseUrl}}"], "path": ["volunteer", "scan", "venue"] },
+            "description": "VOLUNTEER/ADMIN/HOST. Sets checkedInAt. Requires arrivedAt to already be set (gate scan must happen first)."
+          }
+        },
+        {
+          "name": "QR Lookup (Read-only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{volunteerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrToken\": \"<userId>.<hmac-hex>\",\n  \"eventId\": \"{{eventId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/volunteer/scan/lookup", "host": ["{{baseUrl}}"], "path": ["volunteer", "scan", "lookup"] },
+            "description": "Read-only. Returns participant name, registration status, arrival/checkin times without mutating anything."
+          }
+        },
+        {
+          "name": "Event Dashboard (Live Stats)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{volunteerToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/volunteer/events/{{eventId}}/dashboard?page=1&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["volunteer", "events", "{{eventId}}", "dashboard"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            },
+            "description": "VOLUNTEER (scoped)/ADMIN/HOST. Live stats: total, confirmed, arrived, checkedIn counts + participant list."
+          }
+        },
+        {
+          "name": "Export Registrations CSV",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{volunteerToken}}" }],
+            "url": { "raw": "{{baseUrl}}/volunteer/events/{{eventId}}/export", "host": ["{{baseUrl}}"], "path": ["volunteer", "events", "{{eventId}}", "export"] },
+            "description": "Returns text/csv file. Columns: registrationId, status, paymentMethod, paidAmount, arrivedAt, checkedInAt, createdAt, userId, name, email, phone, institution."
+          }
+        },
+        {
+          "name": "Lookup Participant by Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{volunteerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"participant@example.com\",\n  \"eventId\": \"{{eventId}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/volunteer/users/lookup-by-email", "host": ["{{baseUrl}}"], "path": ["volunteer", "users", "lookup-by-email"] },
+            "description": "OTP-gated lookup for on-spot walk-in identification. Sends a confirmation OTP to the participant."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancellation & Audit",
+      "item": [
+        {
+          "name": "Cancel Registration",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{participantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/registrations/{{registrationId}}/cancel", "host": ["{{baseUrl}}"], "path": ["registrations", "{{registrationId}}", "cancel"] },
+            "description": "PARTICIPANT (own only)/ADMIN/HOST. Cancels CONFIRMED registration. Calls Razorpay refund API for 50% of paidAmount. If Razorpay fails, registration stays CONFIRMED. Event must be OPEN. CASH registrations create a MANUAL_REQUIRED refund row."
+          }
+        },
+        {
+          "name": "List Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{hostToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/audit-logs?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["audit-logs"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "actorId", "value": "", "disabled": true },
+                { "key": "targetType", "value": "Registration", "disabled": true },
+                { "key": "startDate", "value": "2026-08-01", "disabled": true },
+                { "key": "endDate", "value": "2026-08-31", "disabled": true }
+              ]
+            },
+            "description": "HOST/ADMIN only. Paginated audit log. Filter by actorId, targetType, startDate, endDate. endDate is inclusive (extended to 23:59:59 UTC)."
+          }
+        }
+      ]
+    }
+  ]
+}

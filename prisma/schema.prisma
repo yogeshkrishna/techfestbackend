@@ -1,0 +1,226 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Role {
+  HOST
+  ADMIN
+  VOLUNTEER
+  PARTICIPANT
+}
+
+enum OtpPurpose {
+  SIGNUP
+  LOGIN
+}
+
+enum EventLifecycle {
+  OPEN
+  REGISTRATION_CLOSED
+  ONGOING
+  COMPLETED
+}
+
+enum RegistrationStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  ARRIVED
+  CHECKED_IN
+  CANCELLED_REFUNDED
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  CASH
+}
+
+enum PaymentStatus {
+  CREATED
+  CAPTURED
+  FAILED
+}
+
+// ─────────────────────────────────────────────
+// MODELS
+// ─────────────────────────────────────────────
+
+/// Core user account. Covers all four roles.
+/// QR token is HMAC-signed at signup and NEVER regenerated (Architectural Decision #1).
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  phone         String
+  institution   String
+  role          Role     @default(PARTICIPANT)
+  emailVerified Boolean  @default(false)
+  /// HMAC-signed token that encodes this user's ID. Embedded in QR code.
+  qrToken       String   @unique
+  suspended     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  // Relations
+  eventsCreated        Event[]               @relation("EventCreator")
+  registrations        Registration[]        @relation("UserRegistrations")
+  onSpotRegistrations  Registration[]        @relation("VolunteerRegistrar")
+  volunteerAssignments VolunteerAssignment[]
+  auditLogs            AuditLog[]
+
+  @@map("users")
+}
+
+/// Short-lived OTP records for email-based authentication.
+/// Supports both SIGNUP and LOGIN flows.
+model EmailOtp {
+  id        String     @id @default(uuid())
+  email     String
+  otpHash   String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  /// Incremented on each failed verification attempt (brute-force guard).
+  attempts  Int        @default(0)
+  createdAt DateTime   @default(now())
+
+  // Index for fast lookups during verification
+  @@index([email, purpose])
+  @@map("email_otps")
+}
+
+/// Maps volunteers to specific events they are allowed to manage.
+/// Architectural Decision #9: volunteers are strictly event-scoped.
+model VolunteerAssignment {
+  id          String @id @default(uuid())
+  volunteerId String
+  eventId     String
+
+  volunteer User  @relation(fields: [volunteerId], references: [id])
+  event     Event @relation(fields: [eventId], references: [id])
+
+  /// Prevent duplicate assignments for the same volunteer+event pair.
+  @@unique([volunteerId, eventId])
+  @@map("volunteer_assignments")
+}
+
+/// A tech fest event. Events are NEVER deleted — only lifecycle-transitioned.
+/// Architectural Decision #7: no DELETE endpoint for events ever.
+model Event {
+  id             String         @id @default(uuid())
+  name           String
+  description    String
+  eventDate      DateTime
+  timeslotStart  DateTime
+  timeslotEnd    DateTime
+  venue          String
+  costPerPerson  Decimal        @db.Decimal(10, 2)
+  totalSeats     Int
+  /// Postgres canonical seat count. Redis holds a fast atomic mirror (Decision #3).
+  seatsRemaining Int
+  lifecycleState EventLifecycle @default(OPEN)
+  createdById    String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Relations
+  createdBy            User                  @relation("EventCreator", fields: [createdById], references: [id])
+  registrations        Registration[]
+  volunteerAssignments VolunteerAssignment[]
+
+  @@map("events")
+}
+
+/// Per-(user, event) record that owns QR validity.
+/// Architectural Decision #2: QR is valid iff this record has a qualifying status.
+model Registration {
+  id                String             @id @default(uuid())
+  userId            String
+  eventId           String
+  status            RegistrationStatus @default(PENDING_PAYMENT)
+  paymentMethod     PaymentMethod
+  paidAmount        Decimal            @db.Decimal(10, 2)
+  /// Seat hold expiry for the 10-minute checkout window (Decision #4).
+  seatHoldExpiresAt DateTime?
+  arrivedAt         DateTime?
+  checkedInAt       DateTime?
+  /// Set when a VOLUNTEER performs on-spot registration on behalf of a participant.
+  registeredById    String?
+  /// Client-supplied idempotency key (Decision #8). Unique per registration attempt.
+  idempotencyKey    String?            @unique
+  createdAt         DateTime           @default(now())
+
+  // Relations
+  user         User      @relation("UserRegistrations", fields: [userId], references: [id])
+  event        Event     @relation(fields: [eventId], references: [id])
+  registeredBy User?     @relation("VolunteerRegistrar", fields: [registeredById], references: [id])
+  payments     Payment[]
+  refunds      Refund[]
+
+  @@index([userId, eventId])
+  @@map("registrations")
+}
+
+/// Tracks each Razorpay payment order lifecycle for a registration.
+model Payment {
+  id               String        @id @default(uuid())
+  registrationId   String
+  razorpayOrderId  String
+  /// Set to null until Razorpay confirms capture.
+  razorpayPaymentId String?
+  amount           Decimal       @db.Decimal(10, 2)
+  status           PaymentStatus @default(CREATED)
+  createdAt        DateTime      @default(now())
+
+  registration Registration @relation(fields: [registrationId], references: [id])
+
+  @@map("payments")
+}
+
+/// Tracks Razorpay refunds triggered on cancellation (Decision #5: automatic 50%).
+model Refund {
+  id               String   @id @default(uuid())
+  registrationId   String
+  razorpayRefundId String
+  amount           Decimal  @db.Decimal(10, 2)
+  /// Mirrors Razorpay refund status string (e.g. "processed", "pending").
+  status           String
+  createdAt        DateTime @default(now())
+
+  registration Registration @relation(fields: [registrationId], references: [id])
+
+  @@map("refunds")
+}
+
+/// Immutable append-only audit trail for all significant actions.
+/// actorId is nullable to support system-initiated actions (e.g. BullMQ jobs).
+model AuditLog {
+  id         String   @id @default(uuid())
+  /// Null for system-initiated actions (e.g. automated seat release).
+  actorId    String?
+  /// Denormalized role for immutability — not a FK so role changes don't affect history.
+  actorRole  String?
+  /// e.g. "REGISTRATION_CANCELLED", "SEAT_RELEASED", "REFUND_INITIATED"
+  action     String
+  /// e.g. "Registration", "Event", "User"
+  targetType String
+  targetId   String
+  /// Arbitrary JSON context: amounts, reasons, before/after states, etc.
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
+}
